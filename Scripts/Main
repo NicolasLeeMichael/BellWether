@@ -1,0 +1,82 @@
+import argparse
+import hashlib
+import pickle
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+from selenium import webdriver
+from bs4 import BeautifulSoup
+
+
+def send_email(credentials, properties):
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = "something has changed"
+    msg['From'] = credentials.send_email
+    msg['To'] = credentials.recv_email
+    attachment = MIMEText(get_valid_html(properties), 'html')
+    msg.attach(attachment)
+    s = smtplib.SMTP('smtp.gmail.com', 587)
+    s.starttls()
+    s.login(credentials.send_email, credentials.password)
+    s.sendmail(credentials.send_email, credentials.recv_email, msg.as_string())
+    s.quit()
+
+
+def get_valid_html(properties):
+    return "<html><body>" + str(properties) + "</html></body>"
+
+
+def get_properties():
+    browser = webdriver.Chrome()
+    browser.get('https://svr2.bellwetherhousing.net/EmbedForms/')
+
+    browser.find_element_by_id('cbx1Bed').click()
+    browser.find_element_by_id('txtNumAdults').send_keys('1')
+    browser.find_element_by_id('txtNumChildren').send_keys('1')
+    browser.find_element_by_id('txtMonthlyWage').send_keys('3500')
+    browser.find_element_by_id('btnSearch').click()
+
+    source = browser.page_source
+    browser.quit()
+    parsed = BeautifulSoup(source, 'html.parser')
+    return parsed.findAll("div", {"class": "property row"})
+
+
+def get_properties_hash(properties):
+    properties_string = ''.join(str(property) for property in properties)
+    return hashlib.md5(properties_string).hexdigest()
+
+
+def updated(properties):
+    current_hash = get_properties_hash(properties)
+    try:
+        previous_hash = pickle.load(open("hash.pickle", "rb"))
+    except IOError:
+        previous_hash = ''
+    return current_hash != previous_hash
+
+
+def update(properties):
+    hash = get_properties_hash(properties)
+    pickle.dump(hash, open("hash.pickle", "wb"))
+
+
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('send_email')
+    parser.add_argument('password')
+    parser.add_argument('recv_email')
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+
+    properties = get_properties()
+
+    if not updated(properties):
+        quit(0)
+
+    update(properties)
+    send_email(get_args(), properties)
+
